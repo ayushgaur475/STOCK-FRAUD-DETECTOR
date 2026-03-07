@@ -47,6 +47,7 @@ def analyze_ticker(ticker: str):
             "volume_spike_ratio": analysis_results["volume_spike_ratio"],
             "social_media_hype": analysis_results["social_hype_score"] 
         },
+        "social_intelligence": analysis_results["social_intelligence"], # <--- NEW LINE
         "risk_assessment": {
             "score": analysis_results["risk_score"],
             "status": analysis_results["status"],

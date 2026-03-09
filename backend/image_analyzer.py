@@ -4,20 +4,70 @@ from PIL import Image
 import io
 from typing import Dict, List, Tuple
 import base64
+import re
+import urllib.request
 
 class ImagePatternDetector:
     """
-    Detects manipulated images, fake trade screens, and doctored profit screenshots
-    using computer vision techniques.
+    Detects scam images using text analysis and computer vision.
+    Primary focus: Text-based indicators of pump-and-dump schemes
     """
     
     def __init__(self):
         self.manipulation_threshold = 0.6
         self.fake_interface_confidence = 0.5
         
+        # Scam indicators - HIGH RISK keywords
+        self.profit_claim_keywords = [
+            r'\b(300%|200%|100%|guaranteed|guaranteed\s+gain)',
+            r'\btarget\s*:\s*\d+%',
+            r'\b(double|triple|quadruple)\s+(money|profit|wealth)',
+            r'\bmade\s+₹[\d,]+\s+(today|yesterday|last\s+week)',
+            r'\bunrealistic\s+(gain|profit)',
+            r'\binside\s+(tip|information|news)',
+            r'\bsecret\s+(formula|strategy|method)',
+        ]
+        
+        self.urgency_keywords = [
+            r'\b(buy\s+now|act\s+now|don[\'t]*\s+miss)',
+            r'\b(limited\s+spot|limited\s+time|hurry)',
+            r'\b(explode|rocket|moon|surge|pump)',
+            r'\b(this\s+will\s+(go|soar|surge|pump))',
+            r'\b(don[\'t]*\s+miss\s+out)',
+            r'\b(fomo|fear\s+of\s+missing)',
+            r'\b(today\s+only|last\s+chance)',
+        ]
+        
+        self.vip_promotion_keywords = [
+            r'\bvip\s+(group|member|club)',
+            r'\bjoin\s+vip',
+            r'\bpaid\s+(group|membership|tip)',
+            r'\bpremium\s+(member|group)',
+            r'\bcall\s+now|whatsapp|telegram',
+            r'\b₹\s*[\d,]+\s*(per\s+)?month',
+            r'\b(premium|vip)\s+access',
+        ]
+        
+        self.insider_keywords = [
+            r'\binsider\s+(tip|info|information)',
+            r'\bconfidential',
+            r'\b(upcoming|tomorrow)\s+big\s+(news|announcement)',
+            r'\bonly\s+(we|this\s+group)\s+know',
+            r'\bexclusive\s+(information|tip)',
+        ]
+        
+        self.manipulative_marketing = [
+            r'\b(profit|cash|money)\s+(image|screenshot|proof)',
+            r'\b(earning|profit)\s+proof',
+            r'\b₹[\d,]+\s+(profit|earning)',
+            r'\b(before|after)\s+joining',
+        ]
+        
     def analyze_image(self, image_data: bytes) -> Dict:
         """
         Analyze image for signs of manipulation and fake interfaces.
+        PRIMARY FOCUS: Text-based scam indicators (profit claims, urgency, VIP promotion, etc.)
+        SECONDARY: Computer vision analysis
         
         Args:
             image_data: Binary image data
@@ -35,20 +85,31 @@ class ImagePatternDetector:
                 image_cv = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
             else:
                 image_cv = image_np
-                
-            # Run all detection methods
-            results = {
-                'overall_risk_score': 0,
-                'is_suspicious': False,
-                'detected_issues': [],
+            
+            # PRIMARY: Extract and analyze text
+            extracted_text = self._extract_text(image_np)
+            text_analysis = self._analyze_text_for_scam(extracted_text)
+            
+            # SECONDARY: Run computer vision detections
+            visual_analysis = {
                 'manipulation_indicators': self._detect_image_manipulation(image_cv),
                 'fake_interface_indicators': self._detect_fake_interface(image_cv),
                 'chart_tampering_indicators': self._detect_chart_manipulation(image_cv),
                 'inconsistency_indicators': self._detect_inconsistencies(image_cv),
             }
             
+            # Combine results with TEXT as primary factor (70% weight)
+            results = {
+                'overall_risk_score': 0,
+                'is_suspicious': False,
+                'detected_issues': [],
+                'text_analysis': text_analysis,
+                'visual_analysis': visual_analysis,
+                'extracted_text': extracted_text[:500]  # Store first 500 chars
+            }
+            
             # Calculate overall risk score
-            results['overall_risk_score'] = self._calculate_risk_score(results)
+            results['overall_risk_score'] = self._calculate_risk_score_weighted(text_analysis, visual_analysis)
             results['is_suspicious'] = results['overall_risk_score'] > self.manipulation_threshold
             
             return results
@@ -60,6 +121,98 @@ class ImagePatternDetector:
                 'is_suspicious': False,
                 'detected_issues': [f'Error analyzing image: {str(e)}']
             }
+    
+    def _extract_text(self, image: np.ndarray) -> str:
+        """Extract text from image. Returns empty string without OCR library."""
+        # Note: OCR extraction requires Tesseract or EasyOCR to be installed
+        # For now, this returns empty and analysis relies on visual patterns
+        return ""
+    
+    def _analyze_text_for_scam(self, text: str) -> Dict:
+        """Analyze extracted text for scam indicators."""
+        text_lower = text.lower()
+        
+        analysis = {
+            'profit_claims': 0,
+            'urgency_language': 0,
+            'vip_promotion': 0,
+            'insider_claims': 0,
+            'manipulative_marketing': 0,
+            'detected_issues': []
+        }
+        
+        # Check for profit claim keywords
+        profit_matches = sum(1 for pattern in self.profit_claim_keywords if re.search(pattern, text_lower, re.IGNORECASE))
+        if profit_matches > 0:
+            analysis['profit_claims'] = min(0.95, 0.4 + (profit_matches * 0.15))
+            analysis['detected_issues'].append(f'Unrealistic profit claims detected ({profit_matches} instances)')
+        
+        # Check for urgency language
+        urgency_matches = sum(1 for pattern in self.urgency_keywords if re.search(pattern, text_lower, re.IGNORECASE))
+        if urgency_matches > 0:
+            analysis['urgency_language'] = min(0.90, 0.3 + (urgency_matches * 0.12))
+            analysis['detected_issues'].append(f'High-pressure/urgency language detected ({urgency_matches} instances)')
+        
+        # Check for VIP promotion
+        vip_matches = sum(1 for pattern in self.vip_promotion_keywords if re.search(pattern, text_lower, re.IGNORECASE))
+        if vip_matches > 0:
+            analysis['vip_promotion'] = min(0.85, 0.5 + (vip_matches * 0.1))
+            analysis['detected_issues'].append(f'VIP/Paid group promotion detected ({vip_matches} instances)')
+        
+        # Check for insider claims
+        insider_matches = sum(1 for pattern in self.insider_keywords if re.search(pattern, text_lower, re.IGNORECASE))
+        if insider_matches > 0:
+            analysis['insider_claims'] = min(0.90, 0.6 + (insider_matches * 0.1))
+            analysis['detected_issues'].append(f'Insider information claims detected ({insider_matches} instances)')
+        
+        # Check for manipulative marketing
+        marketing_matches = sum(1 for pattern in self.manipulative_marketing if re.search(pattern, text_lower, re.IGNORECASE))
+        if marketing_matches > 0:
+            analysis['manipulative_marketing'] = min(0.80, 0.3 + (marketing_matches * 0.15))
+            analysis['detected_issues'].append(f'Manipulative marketing tactics detected ({marketing_matches} instances)')
+        
+        return analysis
+    
+    def _calculate_risk_score_weighted(self, text_analysis: Dict, visual_analysis: Dict) -> float:
+        """
+        Calculate risk score with TEXT as primary factor (70% weight)
+        and visual analysis as secondary (30% weight).
+        """
+        # Text-based risk score (primary - 70%)
+        text_scores = [v for k, v in text_analysis.items() if isinstance(v, (int, float)) and k != 'detected_issues']
+        if text_scores:
+            # Use the maximum text indicator + average of others
+            text_scores_sorted = sorted(text_scores, reverse=True)
+            if len(text_scores_sorted) == 1:
+                text_risk = text_scores_sorted[0]
+            else:
+                text_risk = (text_scores_sorted[0] * 0.6) + (np.mean(text_scores_sorted[1:]) * 0.4)
+        else:
+            text_risk = 0
+        
+        # Visual-based risk score (secondary - 30%)
+        visual_scores = []
+        for key in ['manipulation_indicators', 'fake_interface_indicators', 
+                    'chart_tampering_indicators', 'inconsistency_indicators']:
+            if key in visual_analysis:
+                indicators = visual_analysis[key]
+                category_scores = [value for detector_key, value in indicators.items() 
+                                 if isinstance(value, (int, float)) and detector_key != 'issues' and value > 0]
+                if category_scores:
+                    visual_scores.append(max(category_scores))
+        
+        if visual_scores:
+            visual_scores_sorted = sorted(visual_scores, reverse=True)
+            if len(visual_scores_sorted) == 1:
+                visual_risk = visual_scores_sorted[0]
+            else:
+                visual_risk = (visual_scores_sorted[0] * 0.4) + (np.mean(visual_scores_sorted[1:]) * 0.6)
+        else:
+            visual_risk = 0
+        
+        # Combined risk: 70% text + 30% visual
+        combined_risk = (text_risk * 0.7) + (visual_risk * 0.3)
+        return min(max(combined_risk, 0), 1)
     
     def _detect_image_manipulation(self, image: np.ndarray) -> Dict:
         """Detect signs of image editing and compression artifacts."""
@@ -78,8 +231,11 @@ class ImagePatternDetector:
             
             # Low Laplacian variance suggests heavy compression (common in edited images)
             if laplacian_var < 100:
-                indicators['compression_artifacts'] = 0.7
+                indicators['compression_artifacts'] = 0.8
                 indicators['issues'].append('Heavy compression detected - possible editing')
+            elif laplacian_var < 200:
+                indicators['compression_artifacts'] = 0.5
+                indicators['issues'].append('Moderate compression detected')
             
             # Detect color channel inconsistencies
             b_hist = cv2.calcHist([image], [0], None, [256], [0, 256])
@@ -91,8 +247,10 @@ class ImagePatternDetector:
             gr_diff = cv2.compareHist(g_hist, r_hist, cv2.HISTCMP_CHISQR)
             
             if bg_diff > 1000 or gr_diff > 1000:
-                indicators['color_inconsistencies'] = 0.6
+                indicators['color_inconsistencies'] = 0.7
                 indicators['issues'].append('Unusual color channel distribution - possible manipulation')
+            elif bg_diff > 500 or gr_diff > 500:
+                indicators['color_inconsistencies'] = 0.5
             
             # Detect edge tampering using Canny edge detection
             edges = cv2.Canny(gray, 100, 200)
@@ -100,7 +258,7 @@ class ImagePatternDetector:
             
             # Unusually high or low edge density suggests tampering
             if edge_ratio < 0.01 or edge_ratio > 0.3:
-                indicators['edge_tampering'] = 0.5
+                indicators['edge_tampering'] = 0.6
                 indicators['issues'].append('Unusual edge distribution - possible content removal or addition')
             
         except Exception as e:
@@ -128,9 +286,13 @@ class ImagePatternDetector:
             if circles is not None:
                 # Check if circles are randomly distributed (suspicious)
                 circles = np.uint16(np.around(circles))
-                if len(circles[0]) > 10:
-                    indicators['fake_buttons_detected'] = 0.5
-                    indicators['issues'].append(f'Detected {len(circles[0])} suspicious button-like elements')
+                num_circles = len(circles[0])
+                if num_circles > 50:
+                    indicators['fake_buttons_detected'] = 0.9
+                    indicators['issues'].append(f'Detected {num_circles} suspicious button-like elements - likely fake interface')
+                elif num_circles > 10:
+                    indicators['fake_buttons_detected'] = 0.7
+                    indicators['issues'].append(f'Detected {num_circles} suspicious button-like elements')
             
             # Detect rectangles (UI elements)
             edges = cv2.Canny(gray, 100, 200)
@@ -146,8 +308,11 @@ class ImagePatternDetector:
                 if 0.5 < aspect_ratio < 2.0 and w > 30 and h > 20:
                     rectangles += 1
             
-            if rectangles > 15:
-                indicators['inconsistent_ui_elements'] = 0.4
+            if rectangles > 20:
+                indicators['inconsistent_ui_elements'] = 0.8
+                indicators['issues'].append('Excessive rectangular UI elements detected - possible fake UI')
+            elif rectangles > 15:
+                indicators['inconsistent_ui_elements'] = 0.6
                 indicators['issues'].append('Excessive rectangular UI elements detected')
             
             # Check for suspicious text regions
@@ -155,7 +320,7 @@ class ImagePatternDetector:
             text_ratio = np.sum(binary == 0) / binary.size
             
             if text_ratio > 0.4:
-                indicators['suspicious_text_rendering'] = 0.3
+                indicators['suspicious_text_rendering'] = 0.5
                 indicators['issues'].append('Unusual text density suggesting synthetic interface')
         
         except Exception as e:
@@ -208,15 +373,18 @@ class ImagePatternDetector:
             # Detect smooth curves (candlesticks should have sharp edges)
             contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             
+            smooth_curve_count = 0
             for contour in contours:
                 epsilon = 0.02 * cv2.arcLength(contour, True)
                 approx = cv2.approxPolyDP(contour, epsilon, True)
                 
                 # Number of vertices indicates smoothness
                 if len(approx) > 50:
-                    indicators['line_anomalies'] = 0.4
-                    indicators['issues'].append('Overly smooth lines - possible interpolation artifact')
-                    break
+                    smooth_curve_count += 1
+            
+            if smooth_curve_count > 0:
+                indicators['line_anomalies'] = min(0.5 + (smooth_curve_count * 0.05), 1.0)
+                indicators['issues'].append(f'Detected {smooth_curve_count} overly smooth lines - possible interpolation artifact')
         
         except Exception as e:
             indicators['issues'].append(f'Chart detection error: {str(e)}')
@@ -256,24 +424,33 @@ class ImagePatternDetector:
             brightness_variance = np.var(region_brightness)
             
             if brightness_variance > 1000:
-                indicators['lighting_inconsistencies'] = 0.5
+                indicators['lighting_inconsistencies'] = 0.8
                 indicators['issues'].append('Inconsistent lighting across regions - possible compositing')
+            elif brightness_variance > 500:
+                indicators['lighting_inconsistencies'] = 0.5
+                indicators['issues'].append('Moderate lighting inconsistencies detected')
             
             # Detect shadow anomalies
             _, binary = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
             dark_ratio = np.sum(binary == 0) / binary.size
             
             if dark_ratio > 0.6:
+                indicators['shadow_anomalies'] = 0.6
+                indicators['issues'].append('Excessive dark areas - possible fake shadows or poor quality')
+            elif dark_ratio > 0.4:
                 indicators['shadow_anomalies'] = 0.3
-                indicators['issues'].append('Excessive dark areas - possible fake shadows')
+                indicators['issues'].append('Unusual dark areas detected')
             
             # Detect blending artifacts at edges
             edges = cv2.Canny(gray, 100, 200)
             edge_pixels = np.sum(edges > 0)
             
             if edge_pixels > (gray.size * 0.15):
-                indicators['blending_artifacts'] = 0.4
-                indicators['issues'].append('High edge density - possible poor blending of composite image')
+                indicators['blending_artifacts'] = 0.7
+                indicators['issues'].append('Very high edge density - possible poor blending of composite image')
+            elif edge_pixels > (gray.size * 0.08):
+                indicators['blending_artifacts'] = 0.5
+                indicators['issues'].append('High edge density - possible poor blending')
         
         except Exception as e:
             indicators['issues'].append(f'Inconsistency detection error: {str(e)}')
@@ -288,36 +465,66 @@ class ImagePatternDetector:
                     'chart_tampering_indicators', 'inconsistency_indicators']:
             if key in results:
                 indicators = results[key]
-                for detector_key, value in indicators.items():
-                    if isinstance(value, (int, float)) and detector_key != 'issues':
-                        scores.append(value)
+                # Get max score per category
+                category_scores = [value for detector_key, value in indicators.items() 
+                                 if isinstance(value, (int, float)) and detector_key != 'issues' and value > 0]
+                if category_scores:
+                    scores.append(max(category_scores))
         
         if not scores:
             return 0
         
-        # Average of all indicator scores
-        return min(max(np.mean(scores), 0), 1)
+        # Use weighted average: max score has more weight
+        # This ensures that any significant detection increases risk appropriately
+        sorted_scores = sorted(scores, reverse=True)
+        if len(sorted_scores) == 1:
+            return min(max(sorted_scores[0], 0), 1)
+        
+        # Weighted average: highest score gets 40%, others get 60% split
+        weighted_score = (sorted_scores[0] * 0.4) + (np.mean(sorted_scores[1:]) * 0.6)
+        return min(max(weighted_score, 0), 1)
     
     def get_suspicious_details(self, analysis_results: Dict) -> List[Dict]:
         """
         Format analysis results into readable suspicious details.
+        Prioritizes text-based detections.
         """
         details = []
         
-        categories = {
-            'Manipulation Detected': analysis_results.get('manipulation_indicators', {}),
-            'Fake Interface Detected': analysis_results.get('fake_interface_indicators', {}),
-            'Chart Tampering Detected': analysis_results.get('chart_tampering_indicators', {}),
-            'Inconsistencies Found': analysis_results.get('inconsistency_indicators', {})
-        }
-        
-        for category, indicators in categories.items():
-            if indicators.get('issues'):
-                for issue in indicators['issues']:
+        # TEXT-BASED ANALYSIS (Primary)
+        if 'text_analysis' in analysis_results:
+            text_analysis = analysis_results['text_analysis']
+            
+            if text_analysis.get('detected_issues'):
+                for issue in text_analysis['detected_issues']:
                     details.append({
-                        'category': category,
+                        'category': 'Scam Language Detected',
                         'issue': issue,
-                        'confidence': max([v for k, v in indicators.items() if k != 'issues' and isinstance(v, (int, float))], default=0)
+                        'confidence': 0.95
                     })
+        
+        # VISUAL ANALYSIS (Secondary)
+        if 'visual_analysis' in analysis_results:
+            visual_analysis = analysis_results['visual_analysis']
+            
+            categories_map = {
+                'Manipulation Detected': 'manipulation_indicators',
+                'Fake Interface Detected': 'fake_interface_indicators',
+                'Chart Tampering Detected': 'chart_tampering_indicators',
+                'Inconsistencies Found': 'inconsistency_indicators'
+            }
+            
+            for display_name, key in categories_map.items():
+                if key in visual_analysis:
+                    indicators = visual_analysis[key]
+                    if indicators.get('issues'):
+                        for issue in indicators['issues']:
+                            confidence = max([v for k, v in indicators.items() 
+                                            if k != 'issues' and isinstance(v, (int, float))], default=0)
+                            details.append({
+                                'category': display_name,
+                                'issue': issue,
+                                'confidence': confidence
+                            })
         
         return details

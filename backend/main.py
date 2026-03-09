@@ -3,8 +3,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from data_fetcher import fetch_stock_data
 from pump_detector import analyze_stock_for_manipulation
 from image_analyzer import ImagePatternDetector
+import numpy as np
 
 app = FastAPI(title="Stock Pump & Dump Detector API")
+
+def convert_numpy_types(obj):
+    """
+    Recursively convert NumPy types to native Python types for JSON serialization.
+    """
+    if isinstance(obj, dict):
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, bool):
+        # Check bool before np types since bool is a parent class
+        return bool(obj)
+    elif hasattr(np, 'bool_') and isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, (np.integer, np.int_, np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj
 
 # Initialize image analyzer
 image_detector = ImagePatternDetector()
@@ -93,17 +116,17 @@ async def analyze_image_upload(file: UploadFile = File(...)):
         suspicious_details = image_detector.get_suspicious_details(analysis_results)
         
         # Format response
-        return {
+        visual_analysis = analysis_results.get('visual_analysis', {})
+        response = {
             "file_name": file.filename,
             "image_risk_score": round(analysis_results['overall_risk_score'] * 100, 2),
             "is_suspicious": analysis_results['is_suspicious'],
-            "risk_level": "HIGH" if analysis_results['overall_risk_score'] > 0.7 else 
-                         "MEDIUM" if analysis_results['overall_risk_score'] > 0.4 else "LOW",
+            "risk_level": "HIGH" if analysis_results['overall_risk_score'] > 0.7 else "MEDIUM" if analysis_results['overall_risk_score'] > 0.4 else "LOW",
             "detected_manipulations": {
-                "editing_artifacts": analysis_results['manipulation_indicators'],
-                "fake_interface": analysis_results['fake_interface_indicators'],
-                "chart_tampering": analysis_results['chart_tampering_indicators'],
-                "inconsistencies": analysis_results['inconsistency_indicators']
+                "editing_artifacts": visual_analysis.get('manipulation_indicators', {}),
+                "fake_interface": visual_analysis.get('fake_interface_indicators', {}),
+                "chart_tampering": visual_analysis.get('chart_tampering_indicators', {}),
+                "inconsistencies": visual_analysis.get('inconsistency_indicators', {})
             },
             "suspicious_findings": suspicious_details,
             "summary": {
@@ -115,6 +138,9 @@ async def analyze_image_upload(file: UploadFile = File(...)):
                 )[0] if suspicious_details else "None"
             }
         }
+        
+        # Convert NumPy types to native Python types for JSON serialization
+        return convert_numpy_types(response)
         
     except HTTPException:
         raise

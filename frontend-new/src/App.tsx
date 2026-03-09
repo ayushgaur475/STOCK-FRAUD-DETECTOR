@@ -233,7 +233,7 @@ export default function App() {
       const formData = new FormData();
       formData.append('file', imageFile);
 
-      const response = await fetch('http://127.0.0.1:8000/analyze-image', {
+      const response = await fetch(`http://${window.location.hostname}:8000/analyze-image`, {
         method: 'POST',
         body: formData,
       });
@@ -292,7 +292,7 @@ export default function App() {
     setScanAnim(false);
 
     try {
-      const response = await fetch(`http://127.0.0.1:8000/analyze/${ticker.toUpperCase()}`);
+      const response = await fetch(`http://${window.location.hostname}:8000/analyze/${ticker.toUpperCase()}`);
       if (!response.ok) {
         throw new Error('Stock not found or API error. Try another ticker.');
       }
